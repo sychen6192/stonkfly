@@ -1,4 +1,4 @@
-"""Binance Spot REST client, public paper observations and a read-only check.
+"""Binance Spot client, paper observations, Spot Testnet execution and checks.
 
 Spot Testnet is the default network; the real exchange must be named
 explicitly. Requests are never retried here: a timeout or transport error
@@ -18,8 +18,10 @@ import urllib.request
 from decimal import Decimal
 from pathlib import Path
 
+from .broker import UnresolvedOrder
 from .config import D
 from .market import CoinbaseMarket, Quote
+from .risk import Veto
 
 NETWORKS = {
     "testnet": "https://testnet.binance.vision",
@@ -284,6 +286,238 @@ class BinanceMarket:
         return result
 
     record = CoinbaseMarket.record
+
+
+# Order states after which no further fill can occur.
+FINAL = {"FILLED", "CANCELED", "EXPIRED", "EXPIRED_IN_MATCH", "REJECTED"}
+# Documented error codes whose execution status is unknown despite a 4XX reply.
+UNKNOWN_CODES = {-1006, -1007}
+
+
+class BinanceBroker:
+    """Spot Testnet execution with price-bounded fill-or-kill limit orders.
+
+    Binance keys are account-wide, so the broker manages an allocation: it
+    records the managed assets' balances at initialization and later requires
+    each balance to equal that baseline plus the ledger's own fills. Intent is
+    persisted before the request; an ambiguous result is never resent.
+    """
+
+    mode = "testnet"
+
+    def __init__(self, settings, ledger, client):
+        if client.base != NETWORKS["testnet"]:
+            raise ValueError("Binance execution is implemented for Spot Testnet only")
+        self.s = settings
+        self.l = ledger
+        self.client = client
+        self.assets = ["USDC", *sorted({p.split("-")[0] for p in settings.products})]
+
+    @classmethod
+    def from_env(cls, settings, ledger):
+        return cls(settings, ledger, BinanceClient.from_env("testnet"))
+
+    def balances(self):
+        a = self.client.signed("GET", "/api/v3/account")
+        if a.get("canTrade") is not True:
+            raise RuntimeError("Binance account cannot trade")
+        rows = {b["asset"]: b for b in a.get("balances", [])}
+        result = {}
+        for asset in self.assets:
+            b = rows.get(asset, {"free": "0", "locked": "0"})
+            free, locked = D(b["free"]), D(b["locked"])
+            if min(free, locked) < 0 or locked:
+                raise RuntimeError("Negative or reserved balance in a managed asset")
+            result[asset] = free
+        return result
+
+    def preflight(self):
+        if abs(self.client.clock_offset_ms()) >= 1000:
+            raise RuntimeError("Local clock differs from Binance by >= 1 s; sync it")
+        self.reconcile()
+        if self.l.get("binance_baseline") is None:
+            if (
+                self.l.get("tick")
+                or self.l.db.execute("SELECT COUNT(*) FROM orders").fetchone()[0]
+            ):
+                raise RuntimeError("Uninitialized testnet ledger already has activity")
+            balances = self.balances()
+            if balances["USDC"] < D(self.s.capital):
+                raise RuntimeError("Testnet USDC balance is below the allocation")
+            with self.l.transaction():
+                for k in ["cash", "initial_cash", "anchor"]:
+                    self.l.put(k, self.s.capital)
+                self.l.put("binance_baseline", {k: str(v) for k, v in balances.items()})
+        self.verify_balances()
+        return {
+            "mode": self.mode,
+            "allocation_usdc": self.s.capital,
+            "managed_assets": self.assets,
+        }
+
+    def verify_balances(self):
+        expected = {k: D(v) for k, v in self.l.get("binance_baseline").items()}
+        expected["USDC"] += self.l.cash - D(self.l.get("initial_cash"))
+        for p, amount in self.l.positions.items():
+            expected[p.split("-")[0]] += amount
+        actual = self.balances()
+        if any(abs(actual[a] - expected[a]) > D(".00000001") for a in self.assets):
+            raise RuntimeError(
+                "External balance change; stop and reconcile rather than treat deposits as profit"
+            )
+        for product in self.s.products:
+            if self.client.signed("GET", "/api/v3/openOrders", symbol=symbol(product)):
+                raise RuntimeError("External/open order on a managed symbol")
+
+    def execute(self, p, before_submit):
+        cid = p["client_order_id"]
+        order = {
+            "symbol": symbol(p["product"]),
+            "side": p["side"],
+            "type": "LIMIT",
+            "timeInForce": "FOK",
+            "quantity": p["base_size"],
+            "price": p["limit_price"],
+            "newClientOrderId": cid,
+        }
+        try:
+            try:
+                test = self.client.signed(
+                    "POST", "/api/v3/order/test", computeCommissionRates=True, **order
+                )
+            except BinanceError as e:
+                raise Veto(f"Binance rejected the test order (code {e.code})") from None
+            discount = test.get("discount", {})
+            if discount.get("enabledForAccount") and discount.get("enabledForSymbol"):
+                raise Veto("BNB fee payment is on; fees must stay in traded assets")
+            rates = [
+                (test.get(k) or {}).get("taker")
+                for k in [
+                    "standardCommissionForOrder",
+                    "taxCommissionForOrder",
+                    "specialCommissionForOrder",
+                ]
+            ]
+            if rates[0] is None:
+                raise Veto("Test order did not include fees")
+            rate = sum((D(r) for r in rates if r is not None), D(0))
+            fee = rate * D(p["base_size"]) * D(p["limit_price"])
+            if rate < 0 or fee > D(p["fee_ceiling"]):
+                raise Veto("Fee ceiling exceeded")
+            if time.time() - p["quote_timestamp"] > self.s.max_quote_age:
+                raise Veto("Quote expired during test order")
+            self.verify_balances()
+            before_submit(p)
+        except Exception:
+            self.l.mark(cid, "REJECTED")
+            raise
+        # This durable transition precedes any request that can place an order.
+        self.l.mark(cid, "UNKNOWN")
+        try:
+            r = self.client.signed(
+                "POST", "/api/v3/order", newOrderRespType="FULL", **order
+            )
+        except BinanceError as e:
+            if (
+                e.outcome_unknown
+                or e.code in UNKNOWN_CODES
+                or not 400 <= e.status < 500
+            ):
+                raise UnresolvedOrder(
+                    "Submission outcome unknown; reconcile before any further trade"
+                ) from None
+            # A documented 4XX client error means Binance did not accept the order.
+            self.l.mark(cid, "REJECTED")
+            return {"mode": self.mode, "status": "REJECTED", "code": e.code}
+        except Exception as e:
+            raise UnresolvedOrder(
+                "Submission outcome unknown; reconcile before any further trade"
+            ) from e
+        oid = r.get("orderId")
+        if (
+            oid is None
+            or r.get("clientOrderId") != cid
+            or r.get("symbol") != order["symbol"]
+        ):
+            raise UnresolvedOrder("Exchange response lacks an unambiguous order ID")
+        self.l.mark(cid, "ACCEPTED", str(oid))
+        deadline = time.monotonic() + 30
+        while True:
+            if self._settle(cid, str(oid), p):
+                return {"mode": self.mode, "status": "SETTLED", "client_order_id": cid}
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(1)
+        # FOK should be final at once. Do not assume that a timeout implies no fill.
+        raise UnresolvedOrder("Order is not final; execution stopped")
+
+    def _settle(self, cid, oid, p):
+        s = symbol(p["product"])
+        o = self.client.signed("GET", "/api/v3/order", symbol=s, orderId=oid)
+        if (
+            str(o.get("orderId")) != oid
+            or o.get("clientOrderId") != cid
+            or o.get("symbol") != s
+            or o.get("side") != p["side"]
+        ):
+            raise UnresolvedOrder("Order identity mismatch")
+        if o.get("status") not in FINAL:
+            return False
+        base, quote = D(o["executedQty"]), D(o["cummulativeQuoteQty"])
+        fees = {}
+        if base:
+            trades = self.client.signed(
+                "GET", "/api/v3/myTrades", symbol=s, orderId=oid
+            )
+            if any(str(t.get("orderId")) != oid for t in trades):
+                raise UnresolvedOrder("Trade does not belong to this order")
+            if (
+                sum((D(t["qty"]) for t in trades), D(0)) != base
+                or sum((D(t["quoteQty"]) for t in trades), D(0)) != quote
+            ):
+                return False  # Trade records have not caught up with the order.
+            for t in trades:
+                a = t["commissionAsset"]
+                fees[a] = fees.get(a, D(0)) + D(t["commission"])
+        fees = {a: v for a, v in fees.items() if v}
+        base_asset = p["product"].split("-")[0]
+        if len(fees) > 1 or not set(fees) <= {base_asset, "USDC"}:
+            raise UnresolvedOrder(
+                "Fee charged outside the traded assets; turn off BNB fee payment and reconcile manually"
+            )
+        asset, fee = next(iter(fees.items()), ("USDC", D(0)))
+        self.l.settle(cid, base, quote, fee, "base" if asset == base_asset else "quote")
+        return True
+
+    def reconcile(self):
+        for row in self.l.pending():
+            cid = row["id"]
+            p = row["plan"]
+            oid = row["exchange_id"]
+            if row["status"] == "PREPARED":
+                # Network submission cannot have happened before UNKNOWN.
+                self.l.mark(cid, "REJECTED")
+                continue
+            if not oid:
+                try:
+                    o = self.client.signed(
+                        "GET",
+                        "/api/v3/order",
+                        symbol=symbol(p["product"]),
+                        origClientOrderId=cid,
+                    )
+                except BinanceError as e:
+                    # -2013 means not found; any other code leaves it unconfirmed.
+                    raise UnresolvedOrder(
+                        f"Uncertain submission not confirmed (code {e.code}). "
+                        "Check Binance; no automatic resubmission."
+                    ) from None
+                if o.get("clientOrderId") != cid or o.get("orderId") is None:
+                    raise UnresolvedOrder("Order lookup returned a different order")
+                oid = str(o["orderId"])
+                self.l.mark(cid, "ACCEPTED", oid)
+            if not self._settle(cid, oid, p):
+                raise UnresolvedOrder("Order not yet final at Binance")
 
 
 def check(network, products, environ=None, urlopen=urllib.request.urlopen):

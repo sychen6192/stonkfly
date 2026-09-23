@@ -117,7 +117,10 @@ class Ledger:
             "SELECT COUNT(*) FROM orders WHERE created>=?", (now - now % 86400,)
         ).fetchone()[0]
 
-    def settle(self, cid, base, quote, fee):
+    def settle(self, cid, base, quote, fee, fee_asset="quote"):
+        # Coinbase charges fees in the quote asset; Binance buys pay in base.
+        if fee_asset not in ("quote", "base"):
+            raise ValueError("Fee must be charged in the base or quote asset")
         base, quote, fee = map(D, (base, quote, fee))
         if min(base, quote, fee) < 0:
             raise ValueError("Negative settlement")
@@ -130,6 +133,8 @@ class Ledger:
             if not row:
                 raise RuntimeError("Unknown order")
             payload = {"base": str(base), "quote": str(quote), "fee": str(fee)}
+            if fee_asset != "quote":
+                payload["fee_asset"] = fee_asset
             if row[0] == "SETTLED":
                 if json.loads(row[2]) != payload:
                     raise RuntimeError("Settlement changed after finalization")
@@ -142,16 +147,17 @@ class Ledger:
             cash = self.cash
             if base > D(p["base_size"]):
                 raise RuntimeError("Fill exceeds requested quantity")
+            cash_fee, base_fee = (fee, D(0)) if fee_asset == "quote" else (D(0), fee)
             if p["side"] == "BUY":
                 if quote > D(p["limit_price"]) * base + D(".00000001"):
                     raise RuntimeError("Buy fill exceeded limit price")
-                cash -= quote + fee
-                positions[p["product"]] = held + base
+                cash -= quote + cash_fee
+                positions[p["product"]] = held + base - base_fee
             else:
                 if quote + D(".00000001") < D(p["limit_price"]) * base:
                     raise RuntimeError("Sell fill below limit price")
-                cash += quote - fee
-                positions[p["product"]] = held - base
+                cash += quote - cash_fee
+                positions[p["product"]] = held - base - base_fee
             if cash < 0 or positions[p["product"]] < 0:
                 raise RuntimeError("Fill exceeds reserved account funds")
             self.put("cash", str(cash))
@@ -160,7 +166,8 @@ class Ledger:
                 "UPDATE orders SET status='SETTLED',settlement=? WHERE id=?",
                 (json.dumps(payload), cid),
             )
-            if fee > D(p["fee_ceiling"]):
+            # The ceiling is in quote units; value a base fee at the limit price.
+            if cash_fee + base_fee * D(p["limit_price"]) > D(p["fee_ceiling"]):
                 self.halt(
                     "Actual fee exceeded preview ceiling; fill recorded, further orders stopped"
                 )
