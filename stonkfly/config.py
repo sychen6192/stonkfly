@@ -22,6 +22,10 @@ def up(value, step):
     return (D(value) / D(step)).to_integral_value(rounding=ROUND_UP) * D(step)
 
 
+# Spot pairs the risk limits were written for. One run uses one quote asset.
+PRODUCTS = ("BTC-USDC", "ETH-USDC", "SOL-USDC", "BTC-USDT", "ETH-USDT", "SOL-USDT")
+
+
 @dataclass(frozen=True)
 class Settings:
     products: tuple[str, ...] = ("BTC-USDC",)
@@ -47,9 +51,10 @@ class Settings:
         if (
             not self.products
             or len(set(self.products)) != len(self.products)
-            or not set(self.products) <= set(("BTC-USDC", "ETH-USDC", "SOL-USDC"))
+            or not set(self.products) <= set(PRODUCTS)
+            or len({p.split("-")[1] for p in self.products}) != 1
         ):
-            raise ValueError("Only allowlisted USDC spot pairs")
+            raise ValueError("Only allowlisted spot pairs sharing one quote asset")
         if not 0 < D(self.capital) <= 100 or not 0 < D(self.order_limit) <= min(
             D(self.capital), D(10)
         ):

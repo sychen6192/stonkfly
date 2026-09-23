@@ -11,7 +11,12 @@ import time
 import traceback
 from pathlib import Path
 
-from .config import D, Settings
+from .config import PRODUCTS, D, Settings
+
+# Quote asset each exchange's runs trade; one run holds one quote asset.
+QUOTE = {"coinbase": "USDC", "binance": "USDC", "max": "USDT"}
+# Paper fee per side: Binance regular tier; MAX VIP0 taker. Coinbase keeps 0.6%.
+PAPER_FEE = {"binance": "0.001", "max": "0.0016"}
 
 
 def financial_stop(reason):
@@ -66,15 +71,15 @@ def main():
     run.add_argument(
         "--products",
         nargs="+",
-        default=["BTC-USDC"],
-        choices=["BTC-USDC", "ETH-USDC", "SOL-USDC"],
+        choices=PRODUCTS,
+        help="Default BTC-USDC; BTC-USDT with --exchange max",
     )
     run.add_argument("--neural-ms", type=float, default=500)
     run.add_argument(
         "--exchange",
-        choices=["coinbase", "binance"],
+        choices=list(QUOTE),
         default="coinbase",
-        help="Public price feed; Binance trades only on Spot Testnet",
+        help="Public price feed; only Coinbase trades live, Binance on Spot Testnet",
     )
     run.add_argument(
         "--testnet",
@@ -96,7 +101,7 @@ def main():
         "--products",
         nargs="+",
         default=["BTC-USDC"],
-        choices=["BTC-USDC", "ETH-USDC", "SOL-USDC"],
+        choices=[p for p in PRODUCTS if p.endswith("-USDC")],
     )
     keygen = sub.add_parser(
         "binance-keygen",
@@ -173,21 +178,24 @@ def main():
         return
     if a.live and (a.fixture or a.fast):
         p.error("Live mode forbids fixtures and fast replay")
-    if a.live and a.exchange == "binance":
-        p.error("Binance live execution is not implemented; use paper or --testnet")
+    if a.live and a.exchange != "coinbase":
+        p.error(f"{a.exchange} live execution is not implemented; use paper mode")
     if a.fixture and a.exchange != "coinbase":
         p.error("--fixture replaces the exchange feed; omit --exchange")
     if a.testnet and a.exchange != "binance":
         p.error("--testnet requires --exchange binance")
     if a.steps < 0:
         p.error("steps cannot be negative")
+    quote = QUOTE[a.exchange]
+    products = a.products or [f"BTC-{quote}"]
+    if any(not product.endswith("-" + quote) for product in products):
+        p.error(f"--exchange {a.exchange} trades -{quote} pairs")
     settings = Settings(
-        products=tuple(a.products),
+        products=tuple(products),
         learning=not a.frozen,
         neural_ms=a.neural_ms,
         pulse_ms=min(200, a.neural_ms),
-        # Binance regular-tier spot fee; Coinbase keeps the 0.6% default.
-        paper_fee="0.001" if a.exchange == "binance" else Settings.paper_fee,
+        paper_fee=PAPER_FEE.get(a.exchange, Settings.paper_fee),
     )
     mode = "live" if a.live else "testnet" if a.testnet else "paper"
     out = a.out or Path(
@@ -195,8 +203,8 @@ def main():
         if a.testnet
         else "runs/live"
         if a.live
-        else "runs/binance-paper"
-        if a.exchange == "binance"
+        else f"runs/{a.exchange}-paper"
+        if a.exchange != "coinbase"
         else "runs/paper"
     )
     if not a.preflight_only:
@@ -265,6 +273,10 @@ def main():
                 settings.products,
                 BinanceClient(NETWORKS["testnet"]) if a.testnet else None,
             )
+        elif a.exchange == "max":
+            from .max_exchange import MaxMarket
+
+            market = MaxMarket(settings.products)
         else:
             market = CoinbaseMarket(settings.products)
         previous = ledger.get("observation")
