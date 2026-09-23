@@ -2,7 +2,7 @@
 
 import math
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 from decimal import Decimal
 
@@ -129,6 +129,9 @@ class CoinbaseMarket:
             result[product] = quote
         return result
 
+    # Execution book after neural integration; only record() adds to the chart.
+    refresh = snapshot
+
     def record(self, quotes):
         for p, q in quotes.items():
             self.history[p].append(float((q.bid + q.ask) / 2))
@@ -142,6 +145,7 @@ class FixtureMarket:
         self.products = products
         self.tick = 0
         self.history = {p: [] for p in products}
+        self.quotes = {}
 
     def snapshot(self):
         base = {"BTC-USDC": 60000, "ETH-USDC": 2500, "SOL-USDC": 100}
@@ -165,6 +169,12 @@ class FixtureMarket:
                     for i in range(80)
                 ]
         self.tick += 1
+        self.quotes = quotes
         return quotes
+
+    def refresh(self):
+        # The synthetic market moves once per observation. Advancing it here
+        # would fabricate a price jump between observation and execution.
+        return {p: replace(q, timestamp=time.time()) for p, q in self.quotes.items()}
 
     record = CoinbaseMarket.record

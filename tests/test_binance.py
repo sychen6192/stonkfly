@@ -396,6 +396,13 @@ def test_market_quote_uses_exchange_filters_and_receipt_time():
     assert BinanceMarket(["BTC-USDC"]).client.base == PUBLIC_DATA
 
 
+def test_execution_refresh_rereads_the_book_without_charting_it():
+    m, _, t = observe()
+    assert m.refresh()["BTC-USDC"].bid == Decimal("100")
+    assert sum("/bookTicker" in r.full_url for r in t.sent) == 2
+    assert m.history["BTC-USDC"] == [100.0, 101.0, 102.0]
+
+
 def _info(**fields):
     m = market()
     m["symbols"][0].update(fields)

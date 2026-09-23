@@ -285,6 +285,7 @@ class BinanceMarket:
             )
         return result
 
+    refresh = snapshot
     record = CoinbaseMarket.record
 
 

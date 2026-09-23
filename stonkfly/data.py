@@ -11,6 +11,7 @@ import numpy as np
 from .neural.common import DATA, GRAPH, digest
 
 PACKAGE = Path(__file__).with_name("neural")
+PREPARED = ["annotations.feather", "graph.npz", "normalized/neurons.feather"]
 
 
 def sha(path):
@@ -22,6 +23,12 @@ def sha(path):
 
 
 def verify():
+    missing = [name for name in PREPARED if not (DATA / name).exists()]
+    if missing:
+        raise RuntimeError(
+            f"Prepared data missing from {DATA}: {', '.join(missing)}. "
+            "Run `python -m stonkfly prepare` in the project root, or set STONKFLY_DATA."
+        )
     lock = json.loads((PACKAGE / "sources.lock.json").read_text())
     if sha(DATA / "annotations.feather") != lock["annotations.feather"]["sha256"]:
         raise RuntimeError("Annotation checksum mismatch")
@@ -37,8 +44,6 @@ def verify():
     import pyarrow.feather as f
 
     # Match normalized transmitter identities to the checksum-locked released file.
-    if not (DATA / "normalized/neurons.feather").exists():
-        raise RuntimeError("Normalized neuron metadata missing")
     n = f.read_table(DATA / "normalized/neurons.feather").to_pandas()
     transmitter_values = json.dumps(
         n.neurotransmitter.fillna("").astype(str).tolist(), separators=(",", ":")

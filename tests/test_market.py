@@ -45,7 +45,7 @@ def test_completed_history_and_observation_clock():
     assert m.history["BTC-USDC"] == [101.0, 99.0]
     m.record(quotes)
     assert m.history["BTC-USDC"] == [101.0, 99.0, 100.05]
-    m.snapshot()  # Execution quote refresh must not add another neural observation.
+    m.refresh()  # Execution quote refresh must not add another neural observation.
     assert len(m.history["BTC-USDC"]) == 3
     q = quotes["BTC-USDC"]
     frame = market_frame(q.product, m.history[q.product], q.bid, q.ask)

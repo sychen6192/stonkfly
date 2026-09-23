@@ -14,6 +14,20 @@ from pathlib import Path
 from .config import D, Settings
 
 
+def financial_stop(reason):
+    return "Loss stop" in reason or "fee exceeded" in reason
+
+
+def halted(out, reason):
+    remedy = (
+        "Financial stops cannot be cleared; use a new run directory."
+        if financial_stop(reason)
+        else "After review and reconciliation, rerun with --resume-reviewed."
+    )
+    details = f" See {out / 'error.json'}." if (out / "error.json").exists() else ""
+    return f"Run in {out} is halted: {reason}.{details} {remedy}"
+
+
 def main():
     p = argparse.ArgumentParser(prog="stonkfly")
     sub = p.add_subparsers(dest="command", required=True)
@@ -131,7 +145,13 @@ def main():
     if a.command == "status":
         import sqlite3
 
-        db = sqlite3.connect(f"file:{a.out / 'ledger.sqlite'}?mode=ro", uri=True)
+        path = a.out / "ledger.sqlite"
+        if not path.exists():
+            raise SystemExit(
+                f"No run ledger at {path}; pass --out with a run directory "
+                "(Binance paper runs default to runs/binance-paper)"
+            )
+        db = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
         meta = {k: json.loads(v) for k, v in db.execute("SELECT key,value FROM meta")}
         print(
             json.dumps(
@@ -179,6 +199,15 @@ def main():
         if a.exchange == "binance"
         else "runs/paper"
     )
+    if not a.preflight_only:
+        from .data import verify
+
+        # Checked before any run directory or ledger exists, so an unprepared
+        # dataset can never halt a run.
+        try:
+            verified = verify()
+        except (OSError, RuntimeError) as e:
+            raise SystemExit(f"Dataset check failed: {e}") from None
     out.mkdir(parents=True, exist_ok=True)
     lock = (out / "worker.lock").open("a")
     try:
@@ -188,7 +217,11 @@ def main():
     from .broker import CoinbaseBroker, PaperBroker
     from .ledger import Ledger
 
-    ledger = Ledger(out / "ledger.sqlite", settings, mode)
+    try:
+        ledger = Ledger(out / "ledger.sqlite", settings, mode)
+    except RuntimeError as e:
+        lock.close()
+        raise SystemExit(f"{out}: {e}") from None
     try:
         if a.live:
             broker = CoinbaseBroker.from_env(settings, ledger)
@@ -206,14 +239,13 @@ def main():
                     "Remove STOP only after review; unresolved orders cannot resume"
                 )
             reason = ledger.get("halted")
-            if reason and ("Loss stop" in reason or "fee exceeded" in reason):
+            if reason and financial_stop(reason):
                 raise RuntimeError("A financial stop cannot be cleared by this flag")
             ledger.put("halted", None)
         if a.preflight_only:
             return
-        from .data import verify
-
-        verified = verify()
+        if reason := ledger.get("halted"):
+            raise SystemExit(halted(out, reason))
         from PIL import Image
 
         from .actions import StonkflyActions
@@ -285,8 +317,11 @@ def main():
         count = 0
         while not a.steps or count < a.steps:
             started = time.monotonic()
-            if (out / "STOP").exists() or ledger.get("halted"):
+            if (out / "STOP").exists():
+                print(f"{out / 'STOP'} exists; stopped before observing.", flush=True)
                 break
+            if reason := ledger.get("halted"):
+                raise SystemExit(halted(out, reason))
             broker.reconcile()
             broker.verify_balances()
             quotes = market.snapshot()
@@ -322,7 +357,7 @@ def main():
             if neural["side"] != "HOLD":
                 try:
                     # Neural integration can be slow; use a fresh execution book.
-                    fresh = market.snapshot()
+                    fresh = market.refresh()
                     latest = fresh[product]
                     if abs(latest.bid - q.bid) / q.bid > D(settings.slippage):
                         raise Veto("Price moved beyond neural observation tolerance")
@@ -386,8 +421,10 @@ def main():
             ],
         }
         (out / "error.json").write_text(json.dumps(diagnostic, indent=2) + "\n")
+        # The same reason as error.json, so SDK exception text stays redacted.
         print(
-            f"Stopped safely: {type(e).__name__}. Inspect local state and reconcile before restarting.",
+            f"Stopped safely: {type(e).__name__}: {diagnostic['reason']}\n"
+            f"Details: {out / 'error.json'}. Inspect local state and reconcile before restarting.",
             file=sys.stderr,
         )
         raise SystemExit(1) from None
