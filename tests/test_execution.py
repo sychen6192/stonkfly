@@ -1,6 +1,8 @@
 """No tests send orders to Coinbase. SDK calls here are in-memory doubles."""
 
 import dataclasses
+import subprocess
+import sys
 import time
 
 import pytest
@@ -114,6 +116,30 @@ def test_agentkit_paper_accounting_and_cooldown(env):
         a.invoke({"product": "BTC-USDC", "side": "BUY"})
     with pytest.raises(ValidationError):
         a.invoke({"product": "BTC-USDC", "side": "BUY", "size": 99})
+
+
+def test_actions_work_without_agentkit(tmp_path):
+    # AgentKit is optional: block it in a fresh interpreter and run a paper fill.
+    code = """
+import sys, time
+from pathlib import Path
+sys.modules["coinbase_agentkit"] = None
+from stonkfly.actions import Action, StonkflyActions
+from stonkfly.broker import PaperBroker
+from stonkfly.config import D, Settings
+from stonkfly.ledger import Ledger
+from stonkfly.market import Quote
+from stonkfly.risk import Guard
+assert Action.__module__ == "stonkfly.actions"
+s = Settings()
+out = Path(sys.argv[1])
+l = Ledger(out / "ledger.sqlite", s, "paper")
+p = StonkflyActions(Guard(s, l, out / "STOP"), PaperBroker(s, l))
+e = D(".00000001")
+p.quotes = {"BTC-USDC": Quote("BTC-USDC", D(100), D("100.1"), time.time(), e, D(".01"), D(".01"), D(1), e)}
+assert p.get_actions()[0].invoke({"product": "BTC-USDC", "side": "BUY"})["status"] == "FILLED"
+"""
+    subprocess.run([sys.executable, "-c", code, str(tmp_path)], check=True)
 
 
 def test_daily_attempt_limit(env):

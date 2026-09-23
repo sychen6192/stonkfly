@@ -36,7 +36,7 @@ Over each observation, mean right DNp20 firing minus mean left DNp20 firing is d
 
 This is an engineered interface, not a discovery of “buy neurons.” The mapping is fixed and reads only spike counts. Selected cell IDs appear in the local audit log. Persistent turning-like network bias can therefore become persistent buying; do not interpret that as market insight.
 
-The guard can reject a proposal for price, budget, inventory, timing or account-state reasons. It cannot replace the proposal or manufacture a profitable policy. AgentKit supplies the ActionProvider/Action interface; our custom provider bridges the separate [Coinbase Advanced exchange API](https://docs.cdp.coinbase.com/coinbase-app/advanced-trade-apis/rest-api). Built-in AgentKit on-chain wallet swaps are not used.
+The guard can reject a proposal for price, budget, inventory, timing or account-state reasons. It cannot replace the proposal or manufacture a profitable policy. The provider follows AgentKit's ActionProvider/Action interface, subclassing AgentKit's classes when the optional `agentkit` extra is installed and an identical local interface otherwise; it bridges the separate [Coinbase Advanced exchange API](https://docs.cdp.coinbase.com/coinbase-app/advanced-trade-apis/rest-api). Built-in AgentKit on-chain wallet swaps are not used.
 
 ## What changes with profit and loss
 
