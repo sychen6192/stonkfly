@@ -58,6 +58,26 @@ def main():
     run.add_argument("--neural-ms", type=float, default=500)
     status = sub.add_parser("status")
     status.add_argument("--out", type=Path, default=Path("runs/paper"))
+    bcheck = sub.add_parser(
+        "binance-check",
+        help="Read-only Binance connectivity and account check; never submits orders",
+    )
+    bcheck.add_argument(
+        "--live",
+        action="store_true",
+        help="Check the real exchange instead of Spot Testnet (still read-only)",
+    )
+    bcheck.add_argument(
+        "--products",
+        nargs="+",
+        default=["BTC-USDC"],
+        choices=["BTC-USDC", "ETH-USDC", "SOL-USDC"],
+    )
+    keygen = sub.add_parser(
+        "binance-keygen",
+        help="Create a local Ed25519 key file and print the public key to register",
+    )
+    keygen.add_argument("path", type=Path)
     a = p.parse_args()
     from dotenv import load_dotenv
 
@@ -70,6 +90,32 @@ def main():
             prepare(a.reuse_doomfly)
         else:
             print(json.dumps(verify()))
+        return
+    if a.command == "binance-keygen":
+        from .binance import keygen
+
+        try:
+            public = keygen(a.path)
+        except FileExistsError:
+            raise SystemExit(f"{a.path} exists; refusing to overwrite a key") from None
+        print(public, end="")
+        print(
+            f"Private key written to {a.path} (mode 600). Register the public key above."
+        )
+        return
+    if a.command == "binance-check":
+        from .binance import BinanceError, check
+
+        try:
+            report = check("live" if a.live else "testnet", a.products)
+        except (BinanceError, OSError, ValueError) as e:
+            # HTTP 451 means Binance refuses the caller's region.
+            raise SystemExit(
+                f"Binance check stopped: {type(e).__name__}: {e}"
+            ) from None
+        print(json.dumps(report, indent=2, default=str))
+        if report["problems"]:
+            raise SystemExit(1)
         return
     if a.command == "status":
         import sqlite3

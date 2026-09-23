@@ -36,4 +36,6 @@ python -m stonkfly status
 python -m pytest -q
 ```
 
+Binance support is in development: testnet client and read-only checks only, no Binance orders yet. [Setup](docs/binance.md).
+
 The repo does not come funded or connected to anyone’s account. Live execution needs your local credentials and explicit opt-in.
