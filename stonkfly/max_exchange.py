@@ -120,4 +120,5 @@ class MaxMarket:
             )
         return result
 
+    refresh = snapshot
     record = CoinbaseMarket.record

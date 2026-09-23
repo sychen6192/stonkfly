@@ -116,6 +116,13 @@ def test_quote_takes_best_levels_and_precision_increments():
     assert not any(k.lower().startswith("x-max") for r in t.sent for k in r.headers)
 
 
+def test_execution_refresh_rereads_the_book_without_charting_it():
+    m, _, t = observe()
+    assert m.refresh()["BTC-USDT"].bid == Decimal("100.00")
+    assert sum("/api/v3/depth" in r.full_url for r in t.sent) == 2
+    assert m.history["BTC-USDT"] == [100.0, 101.25, 102.5]
+
+
 @pytest.mark.parametrize(
     "changes",
     [

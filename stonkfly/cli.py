@@ -154,7 +154,7 @@ def main():
         if not path.exists():
             raise SystemExit(
                 f"No run ledger at {path}; pass --out with a run directory "
-                "(Binance paper runs default to runs/binance-paper)"
+                "such as runs/binance-paper or runs/max-paper"
             )
         db = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
         meta = {k: json.loads(v) for k, v in db.execute("SELECT key,value FROM meta")}
