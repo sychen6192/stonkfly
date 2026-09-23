@@ -96,7 +96,7 @@ class MaxMarket:
                 quote != "usdt"
             ):
                 raise RuntimeError("Unexpected product")
-            if m.get("market_status") != "active":
+            if m.get("status") != "active":
                 raise RuntimeError("Product unavailable for spot trading")
             b = self.client.get("/api/v3/depth", market=mid, limit=5)
             # Level order is not guaranteed, so take the best prices directly.

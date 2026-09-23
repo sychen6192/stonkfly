@@ -17,12 +17,13 @@ All requests go to `https://max-api.maicoin.com`:
 - `GET /api/v3/markets` is re-read at every observation. The market must be `active` and have the expected base and quote units. Tick and step sizes come from `quote_unit_precision` and `base_unit_precision`; minimums come from `min_quote_amount` and `min_base_amount`.
 - `GET /api/v3/depth` gives the book. Level order is not guaranteed, so the adapter takes the highest bid and the lowest ask. As with Binance, local receipt time stands in for the quote time.
 
-Anything missing, inactive or crossed stops the run instead of guessing. These formats follow the MAX v3 API as implemented by the open-source bbgo MAX adapter. They are not yet verified against the live API from this repository's development environment, which cannot reach MAX.
+Anything missing, inactive or crossed stops the run instead of guessing. These formats follow the MAX v3 API as implemented by the open-source bbgo MAX adapter, with one correction: live `/api/v3/markets` entries report the market state as `status`, not `market_status`. On 2026-09-24 a paper run against the live API observed BTC-USDT with these filters and filled a paper BUY.
 
 Caveats:
 
 - If a market's `min_quote_amount` is above what a 10 USDT order can buy after the 2% fee reserve, every order is vetoed as below the exchange minimum.
-- Thinner USDT books can exceed the 0.5% spread limit, which vetoes that observation.
+- Thinner USDT books can exceed the 0.5% spread limit. The observation check then halts the run, and a restart needs `--resume-reviewed`. On 2026-09-24 SOL-USDT's spread was 0.44%, BTC-USDT's 0.03%.
+- Minutes without trades return zero-volume candles that repeat the last price, so MAX charts show flat stretches that Coinbase or Binance charts would not.
 
 ## Why there are no MAX orders
 

@@ -44,15 +44,15 @@ class Transport:
 
 
 def btcusdt(**changes):
+    # Field set of a live GET /api/v3/markets entry, checked 2026-09-24.
     return {
         "id": "btcusdt",
-        "name": "BTC/USDT",
-        "market_status": "active",
+        "status": "active",
         "base_unit": "btc",
         "base_unit_precision": 6,
+        "min_base_amount": 0.00015,
         "quote_unit": "usdt",
         "quote_unit_precision": 2,
-        "min_base_amount": 0.00015,
         "min_quote_amount": 8,
         "m_wallet_supported": True,
         **changes,
@@ -61,7 +61,7 @@ def btcusdt(**changes):
 
 def routes(**changes):
     r = {
-        "/api/v3/markets": [btcusdt(), {"id": "btctwd", "market_status": "active"}],
+        "/api/v3/markets": [btcusdt(), {"id": "btctwd", "status": "active"}],
         "/api/v3/k": [
             [MINUTE, 1, 1, 1, 999.0, 1],  # in progress: must never be seen
             [MINUTE - 60, 1, 1, 1, 102.5, 1],
@@ -126,7 +126,7 @@ def test_execution_refresh_rereads_the_book_without_charting_it():
 @pytest.mark.parametrize(
     "changes",
     [
-        {"/api/v3/markets": [btcusdt(market_status="suspended")]},
+        {"/api/v3/markets": [btcusdt(status="suspended")]},
         {"/api/v3/markets": [btcusdt(quote_unit="twd")]},
         {"/api/v3/markets": [btcusdt(base_unit="eth")]},
         {"/api/v3/markets": []},
