@@ -40,4 +40,6 @@ python -m pytest -q
 
 Binance: `run --exchange binance` paper-trades on public Binance prices; add `--testnet` to send orders to Spot Testnet. Real Binance orders are not implemented. [Setup](docs/binance.md).
 
+MAX (MaiCoin): `run --exchange max` paper-trades USDT pairs on public MAX prices; no MAX orders. [Details](docs/max.md).
+
 The repo does not come funded or connected to anyone’s account. Live execution needs your local credentials and explicit opt-in.
