@@ -66,6 +66,8 @@ class Testnet:
         self.rate = "0.001"
         self.commission_asset = None
         self.discount = False
+        self.discount_asset = "BNB"
+        self.discount_rate = "0.25"
         self.test_error = None
         self.after_test = lambda: None
         self.reject = None  # HTTPError raised instead of placing the order
@@ -114,8 +116,8 @@ class Testnet:
             "discount": {
                 "enabledForAccount": self.discount,
                 "enabledForSymbol": True,
-                "discountAsset": "BNB",
-                "discount": "0.25",
+                "discountAsset": self.discount_asset,
+                "discount": self.discount_rate,
             },
         }
 
@@ -317,6 +319,20 @@ def test_checks_before_submission_never_send(env, failure):
     with pytest.raises(Veto):
         buy(provider)
     assert not ex.submissions and not env[1].pending()
+
+
+def test_zero_fee_order_trades_despite_discount_flags(env):
+    # Live Spot Testnet, 2026-09-24: every rate is 0 while both discount flags
+    # stay on without a discount asset. No fee can be charged in any asset.
+    ex, broker, provider = make_broker(env)
+    ex.rate = "0.00000000"
+    ex.discount, ex.discount_asset, ex.discount_rate = True, None, "0.00000000"
+    ex.commission_asset = "BNB"
+    assert buy(provider)["status"] == "SETTLED"
+    (trade,) = ex.trades[1]
+    assert env[1].positions["BTC-USDC"] == D(trade["qty"])
+    assert env[1].cash == D("100") - D(trade["quoteQty"])
+    broker.verify_balances()
 
 
 def test_fee_outside_traded_assets_stops_before_booking(env):

@@ -388,9 +388,6 @@ class BinanceBroker:
                 )
             except BinanceError as e:
                 raise Veto(f"Binance rejected the test order (code {e.code})") from None
-            discount = test.get("discount", {})
-            if discount.get("enabledForAccount") and discount.get("enabledForSymbol"):
-                raise Veto("BNB fee payment is on; fees must stay in traded assets")
             rates = [
                 (test.get(k) or {}).get("taker")
                 for k in [
@@ -402,6 +399,15 @@ class BinanceBroker:
             if rates[0] is None:
                 raise Veto("Test order did not include fees")
             rate = sum((D(r) for r in rates if r is not None), D(0))
+            # A zero rate charges nothing in any asset. Spot Testnet reports
+            # the discount flags on even then, with no discount asset.
+            discount = test.get("discount", {})
+            if (
+                rate
+                and discount.get("enabledForAccount")
+                and discount.get("enabledForSymbol")
+            ):
+                raise Veto("BNB fee payment is on; fees must stay in traded assets")
             fee = rate * D(p["base_size"]) * D(p["limit_price"])
             if rate < 0 or fee > D(p["fee_ceiling"]):
                 raise Veto("Fee ceiling exceeded")

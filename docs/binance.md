@@ -44,7 +44,7 @@ Testnet accounts hold many assets, so the broker trades a **100 USDC allocation*
 
 Each order is a `LIMIT` `FOK` order with the ledger intent as `newClientOrderId`:
 
-1. `POST /api/v3/order/test` with `computeCommissionRates` validates the order without placing it. A test-order error, missing fee rates, a fee above the ceiling, BNB fee payment switched on, a stale quote, a STOP file or a balance mismatch rejects the intent before anything can be placed.
+1. `POST /api/v3/order/test` with `computeCommissionRates` validates the order without placing it. A test-order error, missing fee rates, a fee above the ceiling, BNB fee payment switched on for a nonzero fee, a stale quote, a STOP file or a balance mismatch rejects the intent before anything can be placed. Spot Testnet charges 0 on BTCUSDC but reports both BNB discount flags on, without a discount asset; zero-fee orders proceed.
 2. The intent is marked `UNKNOWN` in SQLite, then `POST /api/v3/order` is sent once.
 3. The final order and its trades (`GET /api/v3/order`, `GET /api/v3/myTrades`) settle the ledger. Buy fees come out of the base asset and sell fees out of USDC, as Binance charges them. A fee in any other asset stops the run before booking.
 
