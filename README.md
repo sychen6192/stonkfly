@@ -36,6 +36,6 @@ python -m stonkfly status
 python -m pytest -q
 ```
 
-Binance: `run --exchange binance` paper-trades on public Binance prices; Binance orders are not implemented yet. [Setup](docs/binance.md).
+Binance: `run --exchange binance` paper-trades on public Binance prices; add `--testnet` to send orders to Spot Testnet. Real Binance orders are not implemented. [Setup](docs/binance.md).
 
 The repo does not come funded or connected to anyone’s account. Live execution needs your local credentials and explicit opt-in.

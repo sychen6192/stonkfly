@@ -60,7 +60,12 @@ def main():
         "--exchange",
         choices=["coinbase", "binance"],
         default="coinbase",
-        help="Public price feed; Binance is paper-only until its broker exists",
+        help="Public price feed; Binance trades only on Spot Testnet",
+    )
+    run.add_argument(
+        "--testnet",
+        action="store_true",
+        help="With --exchange binance: send FOK orders to Spot Testnet (test funds)",
     )
     status = sub.add_parser("status")
     status.add_argument("--out", type=Path, default=Path("runs/paper"))
@@ -149,9 +154,11 @@ def main():
     if a.live and (a.fixture or a.fast):
         p.error("Live mode forbids fixtures and fast replay")
     if a.live and a.exchange == "binance":
-        p.error("Binance live execution is not implemented; use paper mode")
+        p.error("Binance live execution is not implemented; use paper or --testnet")
     if a.fixture and a.exchange != "coinbase":
         p.error("--fixture replaces the exchange feed; omit --exchange")
+    if a.testnet and a.exchange != "binance":
+        p.error("--testnet requires --exchange binance")
     if a.steps < 0:
         p.error("steps cannot be negative")
     settings = Settings(
@@ -162,8 +169,11 @@ def main():
         # Binance regular-tier spot fee; Coinbase keeps the 0.6% default.
         paper_fee="0.001" if a.exchange == "binance" else Settings.paper_fee,
     )
+    mode = "live" if a.live else "testnet" if a.testnet else "paper"
     out = a.out or Path(
-        "runs/live"
+        "runs/binance-testnet"
+        if a.testnet
+        else "runs/live"
         if a.live
         else "runs/binance-paper"
         if a.exchange == "binance"
@@ -178,13 +188,16 @@ def main():
     from .broker import CoinbaseBroker, PaperBroker
     from .ledger import Ledger
 
-    ledger = Ledger(out / "ledger.sqlite", settings, "live" if a.live else "paper")
+    ledger = Ledger(out / "ledger.sqlite", settings, mode)
     try:
-        broker = (
-            CoinbaseBroker.from_env(settings, ledger)
-            if a.live
-            else PaperBroker(settings, ledger)
-        )
+        if a.live:
+            broker = CoinbaseBroker.from_env(settings, ledger)
+        elif a.testnet:
+            from .binance import BinanceBroker
+
+            broker = BinanceBroker.from_env(settings, ledger)
+        else:
+            broker = PaperBroker(settings, ledger)
         result = broker.preflight()
         print(json.dumps(result), flush=True)
         if a.resume_reviewed:
@@ -213,9 +226,13 @@ def main():
         if a.fixture:
             market = FixtureMarket(settings.products)
         elif a.exchange == "binance":
-            from .binance import BinanceMarket
+            from .binance import NETWORKS, BinanceClient, BinanceMarket
 
-            market = BinanceMarket(settings.products)
+            # Testnet orders fill against the testnet book, so observe that book.
+            market = BinanceMarket(
+                settings.products,
+                BinanceClient(NETWORKS["testnet"]) if a.testnet else None,
+            )
         else:
             market = CoinbaseMarket(settings.products)
         previous = ledger.get("observation")
@@ -236,7 +253,11 @@ def main():
             "circuit": controller.brain.circuit["report"],
             "vision": controller.brain.visual_report,
             "mode": broker.mode,
-            "feed": "fixture" if a.fixture else f"{a.exchange}-public",
+            "feed": "fixture"
+            if a.fixture
+            else "binance-testnet"
+            if a.testnet
+            else f"{a.exchange}-public",
             "decoder": "DNp20 mean R-L: buy/sell; DNpe017 spike gate; otherwise hold. Engineered fixed mapping.",
             "learning_validated": False,
             "pain_receptors_modeled": False,
