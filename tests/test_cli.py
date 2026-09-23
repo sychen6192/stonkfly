@@ -112,6 +112,13 @@ def test_changed_settings_are_refused_without_a_traceback(run):
         run("run", "--fixture", "--fast", "--steps", "1", "--out", "r", "--frozen")
 
 
+def test_monitor_without_runs_says_where_it_looked(run):
+    with pytest.raises(SystemExit, match="under runs/"):
+        run("monitor", "--no-browser")
+    with pytest.raises(SystemExit, match="nowhere"):
+        run("monitor", "--out", "nowhere", "--no-browser")
+
+
 def test_status_of_a_missing_run_names_the_directory(run):
     with pytest.raises(SystemExit, match="nowhere"):
         run("status", "--out", "nowhere")

@@ -88,6 +88,14 @@ def main():
     )
     status = sub.add_parser("status")
     status.add_argument("--out", type=Path, default=Path("runs/paper"))
+    monitor = sub.add_parser(
+        "monitor", help="Read-only local web page showing a run as it progresses"
+    )
+    monitor.add_argument(
+        "--out", type=Path, help="Run directory; default: the latest under runs/"
+    )
+    monitor.add_argument("--port", type=int, default=8765)
+    monitor.add_argument("--no-browser", action="store_true")
     bcheck = sub.add_parser(
         "binance-check",
         help="Read-only Binance connectivity and account check; never submits orders",
@@ -146,6 +154,11 @@ def main():
         print(json.dumps(report, indent=2, default=str))
         if report["problems"]:
             raise SystemExit(1)
+        return
+    if a.command == "monitor":
+        from .monitor import serve
+
+        serve(a.out, a.port, not a.no_browser)
         return
     if a.command == "status":
         import sqlite3

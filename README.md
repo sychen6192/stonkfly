@@ -35,6 +35,7 @@ Defaults: $10 maximum order including reserved fees, 24 attempts/day, no shorts 
 
 ```sh
 python -m stonkfly status
+python -m stonkfly monitor   # read-only local page for watching a run
 python -m pytest -q
 ```
 

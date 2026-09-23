@@ -1,0 +1,722 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stonkfly 監控</title>
+<link rel="icon" href="data:,">
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7;
+  --surface: #fcfcfb;
+  --ink: #0b0b0b;
+  --ink-2: #52514e;
+  --muted: #898781;
+  --grid: #e1e0d9;
+  --axis: #c3c2b7;
+  --ring: rgba(11, 11, 11, 0.10);
+  --s1: #2a78d6;
+  --s2: #eb6834;
+  --good: #0ca30c;
+  --good-text: #006300;
+  --warning: #fab219;
+  --serious: #ec835a;
+  --critical: #d03b3b;
+  --sans: -apple-system, BlinkMacSystemFont, "PingFang TC", "Noto Sans TC",
+    "Microsoft JhengHei", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface: #1a1a19;
+    --ink: #ffffff;
+    --ink-2: #c3c2b7;
+    --grid: #2c2c2a;
+    --axis: #383835;
+    --ring: rgba(255, 255, 255, 0.10);
+    --s1: #3987e5;
+    --s2: #d95926;
+    --good-text: #0ca30c;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--ink);
+  font: 15px/1.55 var(--sans);
+}
+main { max-width: 1180px; margin: 0 auto; padding: 20px 24px 64px; }
+h1, h2, h3, p { margin: 0; }
+button, select { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--s1); outline-offset: 2px; }
+
+/* Header: which run, and whether it is alive */
+.top {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px;
+  padding-bottom: 16px; border-bottom: 1px solid var(--grid);
+}
+.top h1 { font-size: 17px; font-weight: 600; margin-right: auto; }
+.top label { color: var(--ink-2); font-size: 14px; display: flex; gap: 8px; align-items: center; }
+.top select {
+  background: var(--surface); border: 1px solid var(--ring); border-radius: 6px;
+  padding: 4px 8px;
+}
+.status { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.status .icon {
+  width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center;
+  font-size: 11px; font-weight: 700; color: #fff;
+}
+.status .when { color: var(--ink-2); }
+.banner {
+  margin-top: 16px; padding: 12px 14px; border-radius: 8px;
+  border: 1px solid var(--ring); background: var(--surface);
+  display: flex; gap: 12px; align-items: flex-start;
+}
+.banner .icon {
+  flex: none; width: 22px; height: 22px; border-radius: 50%;
+  display: grid; place-items: center; color: #fff; font-weight: 700; font-size: 13px;
+}
+.banner strong { display: block; }
+.banner p { color: var(--ink-2); font-size: 14px; }
+
+/* The fly's view and what it decided */
+.hero {
+  display: grid; grid-template-columns: minmax(0, 640px) minmax(260px, 1fr);
+  gap: 32px; margin-top: 24px; align-items: start;
+}
+.eye img, .eye .empty {
+  display: block; width: 100%; aspect-ratio: 16 / 9; border-radius: 4px;
+  image-rendering: pixelated; box-shadow: 0 0 0 1px var(--ring);
+  background: var(--surface);
+}
+.eye .empty { display: grid; place-items: center; color: var(--muted); }
+.eye figcaption { margin-top: 10px; font-size: 14px; color: var(--ink-2); max-width: 60ch; }
+.eye figcaption strong { color: var(--ink); font-weight: 600; }
+
+.decision .seen { color: var(--ink-2); font-size: 14px; }
+.decision .side { display: flex; align-items: baseline; gap: 12px; margin: 6px 0 14px; }
+.decision .side b { font-size: 44px; line-height: 1.1; font-weight: 650; letter-spacing: -0.01em; }
+.decision .side span { font-size: 18px; color: var(--ink-2); }
+.decision .why { font-size: 16px; max-width: 34ch; }
+.readout { margin: 16px 0 0; display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; font-size: 14px; }
+.readout dt { color: var(--ink-2); }
+.readout dd { margin: 0; font-variant-numeric: tabular-nums; }
+.result { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--grid); }
+.result .label { color: var(--ink-2); font-size: 14px; }
+.result .text { font-size: 16px; }
+.brain { margin-top: 14px; font-size: 13px; color: var(--ink-2); }
+
+/* Account figures */
+.tiles {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 1px; margin-top: 32px; background: var(--grid);
+  border: 1px solid var(--grid); border-radius: 8px; overflow: hidden;
+}
+.tile { background: var(--surface); padding: 12px 14px; }
+.tile .label { font-size: 13px; color: var(--ink-2); }
+.tile .value { font-size: 24px; font-weight: 600; line-height: 1.3; }
+.tile .note { font-size: 12px; color: var(--muted); }
+.up { color: var(--good-text); }
+.down { color: var(--critical); }
+
+/* Charts */
+.charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 16px; }
+.panel {
+  background: var(--surface); border-radius: 8px; box-shadow: 0 0 0 1px var(--ring);
+  padding: 14px 16px 10px; position: relative; min-width: 0;
+}
+.panel h2 { font-size: 15px; font-weight: 600; }
+.panel .sub { font-size: 13px; color: var(--ink-2); }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 6px; font-size: 13px; color: var(--ink-2); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.key-line { width: 14px; height: 2px; border-radius: 1px; display: inline-block; }
+.key-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+.key-ring { width: 9px; height: 9px; border-radius: 50%; display: inline-block; box-sizing: border-box; border: 2px solid var(--muted); }
+.key-tick { width: 2px; height: 9px; display: inline-block; }
+.plot { margin-top: 8px; }
+.plot svg { display: block; overflow: visible; }
+.plot svg:focus-visible { outline-offset: 4px; }
+.plot text { font: 11px var(--sans); fill: var(--muted); font-variant-numeric: tabular-nums; }
+.plot .none { font-size: 14px; color: var(--muted); padding: 40px 0; text-align: center; }
+.tip {
+  position: absolute; pointer-events: none; z-index: 2; min-width: 150px;
+  background: var(--surface); border-radius: 6px; padding: 8px 10px;
+  box-shadow: 0 0 0 1px var(--ring), 0 4px 16px rgba(0, 0, 0, 0.12);
+  font-size: 13px;
+}
+.tip .head { color: var(--ink-2); margin-bottom: 4px; }
+.tip .row { display: flex; align-items: center; gap: 8px; }
+.tip .row b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.tip .row span:last-child { color: var(--ink-2); }
+
+/* Tables */
+section.list { margin-top: 32px; }
+section.list h2 { font-size: 15px; font-weight: 600; margin-bottom: 8px; }
+details summary { cursor: pointer; font-size: 15px; font-weight: 600; }
+details summary .sub { font-weight: 400; color: var(--ink-2); font-size: 13px; }
+.scroll { overflow-x: auto; margin-top: 8px; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+th { color: var(--ink-2); font-weight: 500; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.empty-note { color: var(--muted); font-size: 14px; }
+
+@media (max-width: 880px) {
+  main { padding: 16px; }
+  .hero { grid-template-columns: 1fr; gap: 20px; }
+  .charts { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<main>
+  <header class="top">
+    <h1>Stonkfly 監控</h1>
+    <label>Run <select id="run" aria-label="選擇 run"></select></label>
+    <div class="status" id="status" role="status"></div>
+  </header>
+  <div id="banner"></div>
+
+  <section class="hero">
+    <figure class="eye" style="margin:0">
+      <div id="eye"></div>
+      <figcaption>
+        <strong>果蠅看到的畫面。</strong>
+        這張 320×180 的圖就是送進眼睛的全部輸入：網路只收到像素顏色，拿不到價格數字或帳戶餘額。
+      </figcaption>
+    </figure>
+    <div class="decision" id="decision"></div>
+  </section>
+
+  <div class="tiles" id="tiles"></div>
+
+  <div class="charts">
+    <div class="panel" data-chart="value">
+      <h2>帳戶總值</h2>
+      <p class="sub">USDC，現金加上持倉按當時買價計算</p>
+      <div class="plot"></div>
+    </div>
+    <div class="panel" data-chart="decoder">
+      <h2>決策依據：右減左 DNp20 放電差</h2>
+      <p class="sub">Hz。超過 ±2 Hz 門檻、放行神經元也有放電，才會提出買賣</p>
+      <div class="legend">
+        <span><i class="key-dot" style="background:var(--s1)"></i>買進 BUY</span>
+        <span><i class="key-dot" style="background:var(--s2)"></i>賣出 SELL</span>
+        <span><i class="key-dot" style="background:var(--muted)"></i>不動 HOLD</span>
+        <span><i class="key-ring"></i>空心：沒有成交</span>
+      </div>
+      <div class="plot"></div>
+    </div>
+    <div class="panel" data-chart="kc">
+      <h2>KC 放電</h2>
+      <p class="sub">每次觀察（0.5 秒大腦時間）的蕈狀體 Kenyon cell 放電次數</p>
+      <div class="plot"></div>
+    </div>
+    <div class="panel" data-chart="dan">
+      <h2>多巴胺細胞放電</h2>
+      <p class="sub">每次觀察的放電次數。盈虧會觸發人工刺激：賺錢刺激獎勵細胞，賠錢刺激懲罰細胞</p>
+      <div class="legend">
+        <span><i class="key-line" style="background:var(--s1)"></i>獎勵 PAM11</span>
+        <span><i class="key-line" style="background:var(--s2)"></i>懲罰 PPL101</span>
+        <span><i class="key-tick" style="background:var(--ink-2)"></i>底部短線：這次有給刺激</span>
+      </div>
+      <div class="plot"></div>
+    </div>
+  </div>
+
+  <section class="list">
+    <h2>成交紀錄</h2>
+    <div id="orders"></div>
+  </section>
+
+  <section class="list">
+    <details>
+      <summary>每次觀察 <span class="sub">圖表的完整數值，最新的在最上面</span></summary>
+      <div id="observations"></div>
+    </details>
+  </section>
+</main>
+
+<script>
+"use strict";
+const NS = "http://www.w3.org/2000/svg";
+const params = new URLSearchParams(location.search);
+let run = params.get("run");
+let data = null;
+let fetchedAt = 0;
+let fetchError = null;
+let renderError = null;
+let drawnKey = null;
+
+const REASONS = {
+  "Order cooldown": "冷卻中：兩次下單至少隔 60 秒",
+  "Daily order limit": "今天的下單次數用完了",
+  "Insufficient funds/position or below exchange minimum": "錢或持倉不夠，或低於交易所最小下單額",
+  "Price moved beyond neural observation tolerance": "觀察完到下單前價格變動太大",
+  "Spread limit": "買賣價差太大",
+  "Stale or future quote": "報價太舊",
+  "Quote expired before submission": "送單前報價已過期",
+  "Quote expired during test order": "送單前報價已過期",
+  "Quote expired during preview": "送單前報價已過期",
+  "BNB fee payment is on; fees must stay in traded assets": "帳戶開著用 BNB 付手續費",
+  "Fee ceiling exceeded": "手續費超過上限",
+  "STOP file present": "有 STOP 檔",
+  "Execution stopped": "執行已停止",
+  "Order outcome unresolved": "前一張單結果不明，等待對帳",
+};
+const SIDES = { BUY: "買進", SELL: "賣出", HOLD: "不動" };
+const STIMULI = { none: "無", reward: "獎勵刺激", aversive: "懲罰刺激" };
+
+// ---------- small helpers; all data text goes through textContent ----------
+function el(tag, attrs = {}, ...children) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") e.className = v;
+    else if (k === "style") e.style.cssText = v;
+    else e.setAttribute(k, v);
+  }
+  for (const c of children) if (c != null) e.append(c);
+  return e;
+}
+function svg(tag, attrs = {}, parent) {
+  const e = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+  if (parent) parent.append(e);
+  return e;
+}
+const num = (v) => Number(v);
+function money(v, digits = 4) {
+  if (v == null) return "—";
+  return num(v).toLocaleString("zh-TW", { minimumFractionDigits: Math.min(2, digits), maximumFractionDigits: digits });
+}
+function signed(v, digits = 4) {
+  const n = num(v);
+  return (n > 0 ? "+" : n < 0 ? "−" : "") + money(Math.abs(n), digits);
+}
+const count = (v) => num(v).toLocaleString("zh-TW");
+function clock(seconds) {
+  return new Date(seconds * 1000).toLocaleTimeString("zh-TW", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+function hm(seconds) {
+  return new Date(seconds * 1000).toLocaleTimeString("zh-TW", { hour12: false, hour: "2-digit", minute: "2-digit" });
+}
+function ago(seconds) {
+  const s = Math.max(0, Math.round(seconds));
+  if (s < 60) return `${s} 秒前`;
+  if (s < 3600) return `${Math.floor(s / 60)} 分鐘前`;
+  return `${Math.floor(s / 3600)} 小時 ${Math.floor((s % 3600) / 60)} 分鐘前`;
+}
+const reason = (r) => (r ? REASONS[r] || r : "");
+function outcome(status, why) {
+  if (status === "VETO") return `被擋下：${reason(why)}`;
+  if (status === "HOLD") return "沒有下單";
+  if (status === "FILLED" || status === "SETTLED") return "已成交";
+  if (status === "REJECTED") return "交易所拒絕，沒有成交";
+  return status;
+}
+const serverNow = () => (data ? data.now + (Date.now() / 1000 - fetchedAt) : Date.now() / 1000);
+
+// ---------- data ----------
+async function loadRuns() {
+  const names = await (await fetch("/api/runs", { cache: "no-store" })).json();
+  const select = document.getElementById("run");
+  select.replaceChildren(...names.map((n) => el("option", { value: n }, n)));
+  if (!run || !names.includes(run)) run = names[0];
+  select.value = run;
+  select.onchange = () => {
+    run = select.value;
+    history.replaceState(null, "", `?run=${encodeURIComponent(run)}`);
+    data = null;
+    drawnKey = null;
+    refresh();
+  };
+}
+
+async function refresh() {
+  if (!run) return;
+  try {
+    const r = await fetch(`/api/state?run=${encodeURIComponent(run)}`, { cache: "no-store" });
+    if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
+    data = await r.json();
+    fetchedAt = Date.now() / 1000;
+    fetchError = null;
+  } catch (e) {
+    // fetch raises TypeError when nothing answers: the monitor was stopped.
+    fetchError = e instanceof TypeError
+      ? "連不到監控程式，它可能已經關掉了。重新執行 python -m stonkfly monitor 就會恢復。"
+      : String(e.message || e);
+    renderStatus();
+    return;
+  }
+  try {
+    render();
+    renderError = null;
+  } catch (e) {
+    // A page bug must stay visible, not vanish on the next poll.
+    renderError = `${e.name}: ${e.message}`;
+    renderStatus();
+  }
+}
+
+// ---------- status ----------
+function status() {
+  if (fetchError) return { color: "var(--critical)", icon: "!", label: "讀不到資料", note: fetchError };
+  if (renderError) return { color: "var(--critical)", icon: "!", label: "監控畫面出錯" };
+  if (!data) return { color: "var(--muted)", icon: "…", label: "載入中" };
+  if (data.halted) return { color: "var(--critical)", icon: "■", label: "已停止" };
+  if (data.stop_file) return { color: "var(--warning)", icon: "!", label: "有 STOP 檔" };
+  const last = data.latest && data.latest.wall_time;
+  if (last && serverNow() - last > 2 * data.interval_seconds + 30)
+    return { color: "var(--serious)", icon: "?", label: "沒有新的觀察" };
+  if (!last) return { color: "var(--muted)", icon: "…", label: "還沒有觀察" };
+  return { color: "var(--good)", icon: "✓", label: "運作中" };
+}
+
+function renderStatus() {
+  const s = status();
+  const box = document.getElementById("status");
+  const parts = [el("span", { class: "icon", style: `background:${s.color}`, "aria-hidden": "true" }, s.icon), el("span", {}, s.label)];
+  const last = data && data.latest && data.latest.wall_time;
+  if (last) parts.push(el("span", { class: "when" }, `最後更新 ${ago(serverNow() - last)}`));
+  if (last && !data.halted && !data.stop_file && s.label === "運作中") {
+    const next = last + data.interval_seconds - serverNow();
+    if (next > 0) parts.push(el("span", { class: "when" }, `下一次約 ${Math.ceil(next)} 秒後`));
+  }
+  box.replaceChildren(...parts);
+
+  const banner = document.getElementById("banner");
+  banner.replaceChildren();
+  let title = null, body = null, color = null, icon = null;
+  if (fetchError) {
+    [title, body, color, icon] = ["監控讀不到這個 run 的資料", fetchError, "var(--critical)", "!"];
+  } else if (renderError) {
+    [title, body, color, icon] = ["監控畫面出錯，部分內容可能沒有顯示", renderError, "var(--critical)", "!"];
+  } else if (data && data.halted) {
+    const financial = /Loss stop|fee exceeded/.test(data.halted);
+    const detail = data.error && data.error.reason ? `（${data.error.reason}）` : "";
+    body = financial
+      ? "這是財務停損，不能解除。要繼續就換一個新的 run 資料夾。"
+      : "檢查原因、確認帳戶狀態後，用 --resume-reviewed 重新啟動。";
+    [title, color, icon] = [`Run 已停止：${data.halted}${detail}`, "var(--critical)", "■"];
+  } else if (data && data.stop_file) {
+    [title, body, color, icon] = ["有 STOP 檔", "下一次觀察前會停下。要繼續，先刪掉 run 資料夾裡的 STOP 檔。", "var(--warning)", "!"];
+  } else if (s.label === "沒有新的觀察") {
+    [title, body, color, icon] = ["很久沒有新的觀察", "Run 可能已經結束或當掉，也可能電腦睡著了。畫面顯示的是最後一次的資料。", "var(--serious)", "?"];
+  }
+  if (title) {
+    banner.append(el("div", { class: "banner", role: "alert" },
+      el("span", { class: "icon", style: `background:${color}`, "aria-hidden": "true" }, icon),
+      el("div", {}, el("strong", {}, title), el("p", {}, body))));
+  }
+}
+
+// ---------- the fly's view and the decision ----------
+function renderHero() {
+  const eye = document.getElementById("eye");
+  const e = data.latest;
+  if (data.image && e) {
+    const img = el("img", { alt: `果蠅在第 ${e.tick} 次觀察看到的 ${e.product} 走勢圖`, width: 640, height: 360 });
+    img.src = `/image?run=${encodeURIComponent(run)}&t=${e.wall_time}`;
+    eye.replaceChildren(img);
+  } else {
+    eye.replaceChildren(el("div", { class: "empty" }, "還沒有畫面：第一次觀察後就會出現"));
+  }
+
+  const box = document.getElementById("decision");
+  if (!e) {
+    box.replaceChildren(el("p", { class: "empty-note" }, "還沒有觀察紀錄。Run 開始後，第一分鐘內就會出現。"));
+    return;
+  }
+  const n = e.neural, x = e.execution;
+  const diff = n.difference_hz, t = data.decoder_threshold_hz;
+  const gate = n.gate_spikes;
+  const wants = diff >= t ? "BUY" : diff <= -t ? "SELL" : null;
+  let why;
+  if (n.side !== "HOLD") {
+    why = `${n.side === "BUY" ? "右邊" : "左邊"}比${n.side === "BUY" ? "左邊" : "右邊"}多 ${Math.abs(diff).toFixed(0)} Hz，放行神經元也放電了，所以提出${SIDES[n.side]}。`;
+  } else if (wants && !gate) {
+    why = `左右差 ${Math.abs(diff).toFixed(0)} Hz，超過門檻，本來會${SIDES[wants]}；但放行神經元沒有放電，所以不動。`;
+  } else if (!gate) {
+    why = `左右差只有 ${Math.abs(diff).toFixed(0)} Hz，沒超過 ${t} Hz 門檻，放行神經元也沒放電，所以不動。`;
+  } else {
+    why = `放行神經元有放電，但左右差只有 ${Math.abs(diff).toFixed(0)} Hz，沒超過 ${t} Hz 門檻，所以不動。`;
+  }
+  let result = outcome(x.status, x.reason);
+  if (x.base && (x.status === "FILLED" || x.status === "SETTLED")) result += ` ${money(x.base, 8)} ${e.product.split("-")[0]}`;
+
+  const readout = el("dl", { class: "readout" },
+    el("dt", {}, "右側 DNp20"), el("dd", {}, `${n.right_hz.toFixed(0)} Hz`),
+    el("dt", {}, "左側 DNp20"), el("dd", {}, `${n.left_hz.toFixed(0)} Hz`),
+    el("dt", {}, "右減左"), el("dd", {}, `${diff > 0 ? "+" : ""}${diff.toFixed(0)} Hz（門檻 ±${t} Hz）`),
+    el("dt", {}, "放行神經元 DNpe017"), el("dd", {}, `${gate} 次`));
+  const brain = el("dl", { class: "readout brain" },
+    el("dt", {}, "KC 放電"), el("dd", {}, `${count(n.KC_spikes)} 次`),
+    el("dt", {}, "獎勵 PAM11 ／ 懲罰 PPL101"), el("dd", {}, `${count(n.reward_spikes)} ／ ${count(n.aversive_spikes)} 次`),
+    el("dt", {}, "這次給的刺激"), el("dd", {}, STIMULI[n.stimulus] || n.stimulus),
+    el("dt", {}, "變動過的學習突觸"), el("dd", {}, `${count(n.memory.changed_edges)} ／ ${count(n.memory.plastic_edges)}`),
+    el("dt", {}, "計算時間"), el("dd", {}, `${n.compute_seconds.toFixed(1)} 秒`));
+  box.replaceChildren(
+    el("p", { class: "seen" }, `第 ${e.tick} 次觀察，${clock(e.wall_time)}，${e.product} 買價 ${money(e.quote.bid, 2)}`),
+    el("div", { class: "side" }, el("b", {}, n.side), el("span", {}, SIDES[n.side])),
+    el("p", { class: "why" }, why),
+    readout,
+    el("div", { class: "result" }, el("p", { class: "label" }, "執行結果"), el("p", { class: "text" }, result)),
+    brain);
+}
+
+// ---------- account figures ----------
+function renderTiles() {
+  const a = data.account;
+  const tile = (label, value, note, cls = "") =>
+    el("div", { class: "tile" }, el("p", { class: "label" }, label), el("p", { class: `value ${cls}` }, value), note ? el("p", { class: "note" }, note) : null);
+  const pnl = a.pnl == null ? null : num(a.pnl);
+  const held = Object.entries(a.positions).filter(([, v]) => num(v));
+  const cooldown = Math.max(0, data.cooldown_seconds - (Date.now() / 1000 - fetchedAt));
+  document.getElementById("tiles").replaceChildren(
+    tile("總值", a.value == null ? "—" : money(a.value), `USDC，起始 ${money(a.initial_cash, 2)}`),
+    tile("盈虧", pnl == null ? "—" : `${pnl > 0 ? "▲" : pnl < 0 ? "▼" : ""} ${signed(pnl)}`, "相對起始資金", pnl > 0 ? "up" : pnl < 0 ? "down" : ""),
+    tile("現金", `${money(a.cash)}`, "USDC"),
+    tile("持倉", held.length ? held.map(([p, v]) => `${num(v)} ${p.split("-")[0]}`).join("，") : "無", null),
+    tile("今天下單", `${data.attempts_today} ／ ${data.daily_orders}`, "台灣時間早上 8 點歸零"),
+    tile("下單冷卻", cooldown > 0 ? `${Math.ceil(cooldown)} 秒` : "可下單", `兩次下單至少隔 ${data.interval_seconds} 秒`));
+}
+
+// ---------- charts ----------
+function niceStep(raw) {
+  const mag = 10 ** Math.floor(Math.log10(raw));
+  return [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => raw <= s);
+}
+function yScale(values, include = []) {
+  let lo = Math.min(...values, ...include), hi = Math.max(...values, ...include);
+  if (lo === hi) { const pad = Math.abs(lo) * 0.01 || 1; lo -= pad; hi += pad; }
+  const step = niceStep((hi - lo) / 4);
+  lo = Math.floor(lo / step) * step;
+  hi = Math.ceil(hi / step) * step;
+  const ticks = [];
+  for (let v = lo; v <= hi + step / 2; v += step) ticks.push(Number(v.toPrecision(12)));
+  return { lo, hi, ticks, step };
+}
+function timeTicks(t0, t1) {
+  const span = Math.max(60, t1 - t0);
+  const step = [60, 120, 300, 600, 900, 1800, 3600, 7200, 10800, 21600].find((s) => span / s <= 5) || 43200;
+  const out = [];
+  for (let t = Math.ceil(t0 / step) * step; t <= t1; t += step) out.push(t);
+  return out;
+}
+
+/* One line chart. series: [{name, color, values, area}], markers: per-point
+   {color, filled} or null, rules: [{value, label}], ticksBottom: per-point color or null. */
+function lineChart(panel, opts) {
+  const host = panel.querySelector(".plot");
+  host.replaceChildren();
+  panel.querySelectorAll(".tip").forEach((t) => t.remove());
+  const times = opts.times;
+  if (!times.length) {
+    host.append(el("p", { class: "none" }, "還沒有資料"));
+    return;
+  }
+  const W = Math.max(260, host.clientWidth), H = 190;
+  const m = { l: 52, r: opts.endLabels ? 92 : opts.rules ? 72 : 16, t: 10, b: 24 };
+  const all = opts.series.flatMap((s) => s.values).filter((v) => v != null);
+  const y = yScale(all, (opts.rules || []).map((r) => r.value).concat(opts.include || []));
+  const t0 = times[0], t1 = times[times.length - 1];
+  const X = (t) => m.l + (t1 === t0 ? (W - m.l - m.r) / 2 : ((t - t0) / (t1 - t0)) * (W - m.l - m.r));
+  const Y = (v) => m.t + (1 - (v - y.lo) / (y.hi - y.lo)) * (H - m.t - m.b);
+  const s = svg("svg", { width: W, height: H, viewBox: `0 0 ${W} ${H}`, tabindex: 0, role: "img", "aria-label": opts.label }, host);
+
+  for (const v of y.ticks) {
+    svg("line", { x1: m.l, x2: W - m.r, y1: Y(v), y2: Y(v), stroke: "var(--grid)", "stroke-width": 1 }, s);
+    svg("text", { x: m.l - 8, y: Y(v) + 4, "text-anchor": "end" }, s).textContent = opts.format(v);
+  }
+  svg("line", { x1: m.l, x2: W - m.r, y1: H - m.b, y2: H - m.b, stroke: "var(--axis)", "stroke-width": 1 }, s);
+  for (const t of timeTicks(t0, t1)) {
+    svg("text", { x: X(t), y: H - 6, "text-anchor": "middle" }, s).textContent = hm(t);
+  }
+  // Rule labels sit in the right gutter: above their line, or below it.
+  for (const r of opts.rules || []) {
+    svg("line", { x1: m.l, x2: W - m.r, y1: Y(r.value), y2: Y(r.value), stroke: "var(--axis)", "stroke-width": 1 }, s);
+    svg("text", { x: W - m.r + 6, y: Y(r.value) + (r.below ? 11 : -3) }, s).textContent = r.label;
+  }
+  for (const ser of opts.series) {
+    const pts = ser.values.map((v, i) => (v == null ? null : [X(times[i]), Y(v)])).filter(Boolean);
+    if (!pts.length) continue;
+    const d = pts.map((p, i) => `${i ? "L" : "M"}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join("");
+    if (ser.area) {
+      svg("path", { d: `${d}L${pts[pts.length - 1][0].toFixed(1)},${H - m.b}L${pts[0][0].toFixed(1)},${H - m.b}Z`, fill: ser.color, "fill-opacity": 0.1 }, s);
+    }
+    svg("path", { d, fill: "none", stroke: ser.color, "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" }, s);
+    if (pts.length === 1) svg("circle", { cx: pts[0][0], cy: pts[0][1], r: 4, fill: ser.color, stroke: "var(--surface)", "stroke-width": 2 }, s);
+  }
+  if (opts.endLabels) {
+    const ends = opts.series.map((ser) => ({ ser, v: ser.values[ser.values.length - 1] })).filter((e) => e.v != null);
+    const ys = ends.map((e) => Y(e.v));
+    const apart = ys.every((a, i) => ys.every((b, j) => i === j || Math.abs(a - b) >= 14));
+    if (apart) for (const e of ends) {
+      svg("text", { x: W - m.r + 6, y: Y(e.v) + 4, style: "fill:var(--ink-2)" }, s).textContent = `${e.ser.name} ${opts.format(e.v)}`;
+    }
+  }
+  (opts.ticksBottom || []).forEach((c, i) => {
+    if (c) svg("rect", { x: X(times[i]) - 1, y: H - m.b - 7, width: 2, height: 7, fill: c }, s);
+  });
+  (opts.markers || []).forEach((mk, i) => {
+    const v = opts.series[0].values[i];
+    if (!mk || v == null) return;
+    svg("circle", mk.filled
+      ? { cx: X(times[i]), cy: Y(v), r: 4.5, fill: mk.color, stroke: "var(--surface)", "stroke-width": 2 }
+      : { cx: X(times[i]), cy: Y(v), r: 4, fill: "var(--surface)", stroke: mk.color, "stroke-width": 2 }, s);
+  });
+
+  // Crosshair + tooltip: snap to the nearest observation; keyboard arrows too.
+  const cross = svg("line", { y1: m.t, y2: H - m.b, stroke: "var(--ink-2)", "stroke-width": 1, visibility: "hidden" }, s);
+  const tip = el("div", { class: "tip", hidden: "" });
+  panel.append(tip);
+  let at = null;
+  const show = (i) => {
+    at = i;
+    const cx = X(times[i]);
+    cross.setAttribute("x1", cx); cross.setAttribute("x2", cx); cross.setAttribute("visibility", "visible");
+    tip.replaceChildren(el("div", { class: "head" }, opts.head(i)),
+      ...opts.rows(i).map(([color, value, name]) => el("div", { class: "row" },
+        el("i", { class: "key-line", style: `background:${color}` }), el("b", {}, value), el("span", {}, name))));
+    tip.hidden = false;
+    const hostBox = host.getBoundingClientRect(), panelBox = panel.getBoundingClientRect();
+    const left = hostBox.left - panelBox.left + cx;
+    tip.style.top = `${hostBox.top - panelBox.top + m.t}px`;
+    tip.style.left = left + tip.offsetWidth + 16 > panel.clientWidth ? `${left - tip.offsetWidth - 12}px` : `${left + 12}px`;
+  };
+  const hide = () => { at = null; tip.hidden = true; cross.setAttribute("visibility", "hidden"); };
+  const nearest = (px) => {
+    let best = 0;
+    for (let i = 1; i < times.length; i++) if (Math.abs(X(times[i]) - px) < Math.abs(X(times[best]) - px)) best = i;
+    return best;
+  };
+  s.addEventListener("pointermove", (ev) => show(nearest(ev.clientX - s.getBoundingClientRect().left)));
+  s.addEventListener("pointerleave", hide);
+  s.addEventListener("focus", () => show(times.length - 1));
+  s.addEventListener("blur", hide);
+  s.addEventListener("keydown", (ev) => {
+    if (ev.key === "ArrowLeft" && at > 0) { show(at - 1); ev.preventDefault(); }
+    if (ev.key === "ArrowRight" && at < times.length - 1) { show(at + 1); ev.preventDefault(); }
+    if (ev.key === "Escape") hide();
+  });
+}
+
+function renderCharts() {
+  const h = data.history;
+  const times = h.map((p) => p.time);
+  const head = (i) => `第 ${h[i].tick} 次，${clock(h[i].time)}`;
+  const panel = (name) => document.querySelector(`[data-chart="${name}"]`);
+  const start = num(data.account.initial_cash);
+
+  lineChart(panel("value"), {
+    label: "帳戶總值走勢", times, head, include: [start],
+    series: [{ name: "總值", color: "var(--s1)", values: h.map((p) => num(p.equity)), area: true }],
+    rules: [{ value: start, label: `起始 ${money(start, 0)}` }],
+    format: (v) => money(v, 2),
+    rows: (i) => [["var(--s1)", `${money(h[i].equity)} USDC`, "總值"], ["var(--axis)", signed(num(h[i].equity) - start), "相對起始"]],
+  });
+
+  const t = data.decoder_threshold_hz;
+  lineChart(panel("decoder"), {
+    label: "右減左 DNp20 放電差與每次決策", times, head,
+    series: [{ name: "右減左", color: "var(--axis)", values: h.map((p) => p.right_hz - p.left_hz) }],
+    rules: [{ value: t, label: `+${t} Hz 買` }, { value: -t, label: `−${t} Hz 賣`, below: true }],
+    endLabels: false,
+    format: (v) => `${v > 0 ? "+" : ""}${Number(v.toFixed(1))}`,
+    markers: h.map((p) => ({
+      color: p.side === "BUY" ? "var(--s1)" : p.side === "SELL" ? "var(--s2)" : "var(--muted)",
+      filled: p.side === "HOLD" || p.execution === "FILLED" || p.execution === "SETTLED",
+    })),
+    rows: (i) => {
+      const p = h[i];
+      return [
+        [p.side === "BUY" ? "var(--s1)" : p.side === "SELL" ? "var(--s2)" : "var(--muted)", `${p.side} ${SIDES[p.side]}`, outcome(p.execution, p.reason)],
+        ["var(--axis)", `${p.right_hz.toFixed(0)} − ${p.left_hz.toFixed(0)} Hz`, "右減左"],
+        ["var(--axis)", `${p.gate_spikes} 次`, "放行神經元"],
+      ];
+    },
+  });
+
+  lineChart(panel("kc"), {
+    label: "KC 放電次數走勢", times, head,
+    series: [{ name: "KC", color: "var(--s1)", values: h.map((p) => p.kc_spikes) }],
+    format: (v) => count(v),
+    rows: (i) => [["var(--s1)", `${count(h[i].kc_spikes)} 次`, "KC 放電"]],
+  });
+
+  lineChart(panel("dan"), {
+    label: "獎勵與懲罰多巴胺細胞放電走勢", times, head, endLabels: true,
+    series: [
+      { name: "獎勵", color: "var(--s1)", values: h.map((p) => p.reward_spikes) },
+      { name: "懲罰", color: "var(--s2)", values: h.map((p) => p.aversive_spikes) },
+    ],
+    format: (v) => count(v),
+    ticksBottom: h.map((p) => (p.stimulus === "reward" ? "var(--s1)" : p.stimulus === "aversive" ? "var(--s2)" : null)),
+    rows: (i) => [
+      ["var(--s1)", `${count(h[i].reward_spikes)} 次`, "獎勵 PAM11"],
+      ["var(--s2)", `${count(h[i].aversive_spikes)} 次`, "懲罰 PPL101"],
+      ["var(--axis)", STIMULI[h[i].stimulus] || h[i].stimulus, "這次給的刺激"],
+    ],
+  });
+}
+
+// ---------- tables ----------
+function table(headers, rows) {
+  return el("div", { class: "scroll" }, el("table", {},
+    el("thead", {}, el("tr", {}, ...headers.map(([h, cls]) => el("th", { class: cls || "", scope: "col" }, h)))),
+    el("tbody", {}, ...rows.map((r) => el("tr", {}, ...r.map(([v, cls]) => el("td", { class: cls || "" }, v)))))));
+}
+function renderOrders() {
+  const box = document.getElementById("orders");
+  if (!data.orders.length) {
+    box.replaceChildren(el("p", { class: "empty-note" }, "還沒有下過單。果蠅提出買賣、而且通過風控時，這裡會出現紀錄。"));
+    return;
+  }
+  const states = { SETTLED: "已成交", REJECTED: "沒成交", PREPARED: "準備中", UNKNOWN: "結果不明，等待對帳", ACCEPTED: "交易所已接受" };
+  box.replaceChildren(table(
+    [["時間"], ["買賣"], ["數量", "num"], ["成交金額", "num"], ["成交均價", "num"], ["手續費", "num"], ["狀態"], ["交易所編號"]],
+    data.orders.map((o) => {
+      const price = o.filled && num(o.filled) ? money(num(o.quote) / num(o.filled), 2) : "—";
+      const feeAsset = o.fee_asset === "base" ? o.product.split("-")[0] : o.product.split("-")[1];
+      return [[clock(o.time)], [`${o.side} ${SIDES[o.side]}`], [money(o.filled ?? o.size, 8), "num"], [o.quote ? money(o.quote) : "—", "num"],
+        [price, "num"], [o.fee != null ? `${money(o.fee, 8)} ${feeAsset}` : "—", "num"], [states[o.status] || o.status], [o.exchange_id || "—"]];
+    })));
+}
+function renderObservations() {
+  const h = data.history.slice(-60).reverse();
+  document.getElementById("observations").replaceChildren(h.length ? table(
+    [["時間"], ["次"], ["決定"], ["執行"], ["右 Hz", "num"], ["左 Hz", "num"], ["放行", "num"], ["KC", "num"], ["獎勵", "num"], ["懲罰", "num"], ["刺激"], ["買價", "num"], ["總值", "num"]],
+    h.map((p) => [[clock(p.time)], [String(p.tick)], [p.side], [outcome(p.execution, p.reason)],
+      [p.right_hz.toFixed(0), "num"], [p.left_hz.toFixed(0), "num"], [String(p.gate_spikes), "num"], [count(p.kc_spikes), "num"],
+      [String(p.reward_spikes), "num"], [String(p.aversive_spikes), "num"], [STIMULI[p.stimulus] || p.stimulus], [money(p.bid, 2), "num"], [money(p.equity), "num"]])
+  ) : el("p", { class: "empty-note" }, "還沒有觀察紀錄。"));
+}
+
+// ---------- orchestration ----------
+function render() {
+  renderStatus();
+  renderTiles();
+  const key = `${data.run}:${data.tick}:${data.history.length}:${data.orders.length}:${data.halted}`;
+  if (key === drawnKey) return; // Keep open tooltips steady between polls.
+  document.title = `Stonkfly 監控：${data.run}`;
+  renderHero();
+  renderCharts();
+  renderOrders();
+  renderObservations();
+  drawnKey = key; // Only once every part has drawn, so a failure retries.
+}
+
+let resizeTimer;
+addEventListener("resize", () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => { if (data) renderCharts(); }, 150);
+});
+setInterval(() => { if (data) { renderStatus(); renderTiles(); } }, 1000);
+loadRuns().then(refresh).catch((e) => { fetchError = String(e.message || e); renderStatus(); });
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>

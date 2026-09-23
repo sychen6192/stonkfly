@@ -25,6 +25,7 @@ stonkfly = "stonkfly.cli:main"
 include = ["stonkfly*"]
 
 [tool.setuptools.package-data]
+"stonkfly" = ["*.html"]
 "stonkfly.neural" = ["*.cpp", "*.json"]
 
 [tool.pytest.ini_options]
