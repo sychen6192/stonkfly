@@ -1,4 +1,4 @@
-"""Minimal signed Binance Spot REST client and a read-only account check.
+"""Binance Spot REST client, public paper observations and a read-only check.
 
 Spot Testnet is the default network; the real exchange must be named
 explicitly. Requests are never retried here: a timeout or transport error
@@ -9,6 +9,7 @@ import base64
 import hashlib
 import hmac
 import json
+import math
 import os
 import time
 import urllib.error
@@ -16,6 +17,9 @@ import urllib.parse
 import urllib.request
 from decimal import Decimal
 from pathlib import Path
+
+from .config import D
+from .market import CoinbaseMarket, Quote
 
 NETWORKS = {
     "testnet": "https://testnet.binance.vision",
@@ -212,6 +216,74 @@ def _filters(info):
         "min_qty": f.get("LOT_SIZE", {}).get("minQty"),
         "min_notional": notional.get("minNotional"),
     }
+
+
+class BinanceMarket:
+    """Public Binance observations for paper runs. Needs no account key."""
+
+    def __init__(self, products, client=None, clock=time.time):
+        self.client = client or BinanceClient(PUBLIC_DATA)
+        self.products = products
+        self.history = {p: [] for p in products}
+        self._clock = clock
+
+    def _seed(self, s):
+        # Seed only completed, past one-minute candles. No future samples.
+        end = int(self._clock() // 60) * 60 * 1000
+        klines = self.client.get(
+            "/api/v3/klines", symbol=s, interval="1m", endTime=end - 1, limit=120
+        )
+        past = sorted((k for k in klines if int(k[0]) < end), key=lambda k: int(k[0]))
+        if not past:
+            raise RuntimeError("No historical candles available")
+        closes = [float(D(k[4])) for k in past]
+        if any(not math.isfinite(v) or v <= 0 for v in closes):
+            raise RuntimeError("Invalid historical price")
+        return closes
+
+    def snapshot(self):
+        result = {}
+        for product in self.products:
+            s = symbol(product)
+            if not self.history[product]:
+                self.history[product] = self._seed(s)
+            # Refresh tradeability at every observation, not just startup.
+            info = self.client.get("/api/v3/exchangeInfo", symbol=s)["symbols"]
+            m = info[0] if len(info) == 1 else {}
+            if (
+                m.get("symbol") != s
+                or f"{m.get('baseAsset')}-{m.get('quoteAsset')}" != product
+                or m.get("quoteAsset") != "USDC"
+            ):
+                raise RuntimeError("Unexpected product")
+            if (
+                m.get("status") != "TRADING"
+                or m.get("isSpotTradingAllowed") is not True
+                or "LIMIT" not in m.get("orderTypes", [])
+            ):
+                raise RuntimeError("Product unavailable for immediate spot execution")
+            f = _filters(m)
+            if None in f.values() or "quoteAssetPrecision" not in m:
+                raise RuntimeError("Missing exchange filter")
+            b = self.client.get("/api/v3/ticker/bookTicker", symbol=s)
+            # Spot book responses carry no exchange timestamp; use receipt time.
+            received = self._clock()
+            if b.get("symbol") != s or not D(b["bidPrice"]) > 0:
+                raise RuntimeError("Empty or mismatched book")
+            result[product] = Quote(
+                product,
+                D(b["bidPrice"]),
+                D(b["askPrice"]),
+                received,
+                D(f["step_size"]),
+                D(1).scaleb(-int(m["quoteAssetPrecision"])),
+                D(f["tick_size"]),
+                D(f["min_notional"]),
+                D(f["min_qty"]),
+            )
+        return result
+
+    record = CoinbaseMarket.record
 
 
 def check(network, products, environ=None, urlopen=urllib.request.urlopen):

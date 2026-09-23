@@ -1,6 +1,17 @@
 # Binance development setup
 
-Status: **development scaffolding only.** `stonkfly/binance.py` provides a signed Spot REST client, key generation and a read-only account check. There is no Binance market adapter or broker yet: `run` still observes Coinbase and trades only through the Coinbase broker. Nothing in this code submits a Binance order.
+Status: **paper trading on Binance prices works; there is no Binance broker yet.** `stonkfly/binance.py` provides public observations for paper runs, a signed Spot REST client, key generation and a read-only account check. Nothing in this code submits a Binance order, and `run --live --exchange binance` is refused.
+
+## Paper trading on Binance prices
+
+```sh
+python -m stonkfly run --exchange binance
+python -m stonkfly status --out runs/binance-paper
+```
+
+No key is needed. Observations come from the public market-data endpoint: completed one-minute klines seed the chart, and every observation re-reads `exchangeInfo` (status, spot permission, `LIMIT` support, tick size, step size, minimum quantity and notional) plus the best bid/ask. Anything missing or unexpected stops the run instead of guessing. Paper fills charge 0.1%, Binance's regular-tier spot fee; your account's rate can differ (`binance-check` shows it).
+
+The chart, neural model, decoder and limits are unchanged; only the price source and fee differ. Runs default to `runs/binance-paper`, and the ledger refuses to mix exchanges in one run directory.
 
 ## Endpoints
 
@@ -43,8 +54,8 @@ Testnet and real keys use separate variables (`BINANCE_TESTNET_*` and `BINANCE_*
 
 ## Remaining work before Binance execution
 
-- **Market adapter:** klines, `exchangeInfo` filters and best bid/ask from the public data endpoint. Spot depth responses carry no timestamp, so quote age must come from local receipt time.
+- **Quote age:** Binance book responses carry no timestamp, so paper quotes use local receipt time. A live broker should also require a small `binance-check` clock offset.
 - **Broker:** `LIMIT` orders with `timeInForce=FOK`, `newClientOrderId` from the ledger intent and `newOrderRespType=FULL`, with reconciliation through `origClientOrderId`. Fee ceilings come from `/api/v3/account/commission`, because Binance has no Coinbase-style preview.
 - **Fee currency:** Binance charges buy fees in the base asset and sell fees in the quote asset, or in BNB when BNB fee payment is on. The ledger currently deducts every fee from cash. Turn BNB fee payment off and record fees per currency before any live order.
 - **Account isolation:** Binance keys are account-wide. Use a dedicated sub-account where available, or restrict balance reconciliation to the managed assets.
-- **Wiring:** an explicit exchange selection in the CLI, provenance feed labels, and a separate run directory for Binance.
+- **Testnet run:** a broker for Spot Testnet, observing testnet prices rather than the real market, before any live order path.

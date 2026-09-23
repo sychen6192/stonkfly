@@ -56,6 +56,12 @@ def main():
         choices=["BTC-USDC", "ETH-USDC", "SOL-USDC"],
     )
     run.add_argument("--neural-ms", type=float, default=500)
+    run.add_argument(
+        "--exchange",
+        choices=["coinbase", "binance"],
+        default="coinbase",
+        help="Public price feed; Binance is paper-only until its broker exists",
+    )
     status = sub.add_parser("status")
     status.add_argument("--out", type=Path, default=Path("runs/paper"))
     bcheck = sub.add_parser(
@@ -142,6 +148,10 @@ def main():
         return
     if a.live and (a.fixture or a.fast):
         p.error("Live mode forbids fixtures and fast replay")
+    if a.live and a.exchange == "binance":
+        p.error("Binance live execution is not implemented; use paper mode")
+    if a.fixture and a.exchange != "coinbase":
+        p.error("--fixture replaces the exchange feed; omit --exchange")
     if a.steps < 0:
         p.error("steps cannot be negative")
     settings = Settings(
@@ -149,8 +159,16 @@ def main():
         learning=not a.frozen,
         neural_ms=a.neural_ms,
         pulse_ms=min(200, a.neural_ms),
+        # Binance regular-tier spot fee; Coinbase keeps the 0.6% default.
+        paper_fee="0.001" if a.exchange == "binance" else Settings.paper_fee,
     )
-    out = a.out or Path("runs/live" if a.live else "runs/paper")
+    out = a.out or Path(
+        "runs/live"
+        if a.live
+        else "runs/binance-paper"
+        if a.exchange == "binance"
+        else "runs/paper"
+    )
     out.mkdir(parents=True, exist_ok=True)
     lock = (out / "worker.lock").open("a")
     try:
@@ -192,11 +210,14 @@ def main():
         from .reinforcement import reinforcement
         from .risk import Guard, Veto
 
-        market = (
-            FixtureMarket(settings.products)
-            if a.fixture
-            else CoinbaseMarket(settings.products)
-        )
+        if a.fixture:
+            market = FixtureMarket(settings.products)
+        elif a.exchange == "binance":
+            from .binance import BinanceMarket
+
+            market = BinanceMarket(settings.products)
+        else:
+            market = CoinbaseMarket(settings.products)
         previous = ledger.get("observation")
         if previous:
             market.history = previous["market_history"]
@@ -215,7 +236,7 @@ def main():
             "circuit": controller.brain.circuit["report"],
             "vision": controller.brain.visual_report,
             "mode": broker.mode,
-            "feed": "fixture" if a.fixture else "coinbase-public",
+            "feed": "fixture" if a.fixture else f"{a.exchange}-public",
             "decoder": "DNp20 mean R-L: buy/sell; DNpe017 spike gate; otherwise hold. Engineered fixed mapping.",
             "learning_validated": False,
             "pain_receptors_modeled": False,
