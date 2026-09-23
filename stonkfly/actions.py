@@ -1,15 +1,37 @@
-"""AgentKit ActionProvider for Coinbase Advanced (an exchange, not CDP wallet).
+"""Spot-order action for the fixed neural decoder, shaped as an AgentKit provider.
 
 The public Action objects are invoked directly by the fixed neural decoder.
 No LLM, general wallet tools, transfers, or AgentKit analytics decorator.
+AgentKit is optional (`pip install -e '.[agentkit]'`); without it, the same
+two-class interface is defined here, avoiding about 90 extra blockchain packages.
 """
 
 import time
+from abc import ABC, abstractmethod
+from collections.abc import Callable
 from typing import Literal
 
-from coinbase_agentkit import ActionProvider
-from coinbase_agentkit.action_providers.action_provider import Action
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
+
+try:
+    from coinbase_agentkit import ActionProvider
+    from coinbase_agentkit.action_providers.action_provider import Action
+except ModuleNotFoundError:
+
+    class Action(BaseModel):
+        model_config = ConfigDict(arbitrary_types_allowed=True)
+        name: str
+        description: str
+        args_schema: type[BaseModel] | None = None
+        invoke: Callable = Field(..., exclude=True)
+
+    class ActionProvider(ABC):
+        def __init__(self, name, action_providers):
+            self.name = name
+            self.action_providers = action_providers
+
+        @abstractmethod
+        def supports_network(self, network): ...
 
 
 class Proposal(BaseModel):
@@ -32,7 +54,7 @@ class StonkflyActions(ActionProvider):
         return [
             Action(
                 name="stonkfly_spot_order",
-                description="Submit a budget-checked, price-bounded Coinbase Advanced spot FOK order from a neural proposal.",
+                description="Submit a budget-checked, price-bounded spot FOK order from a neural proposal.",
                 args_schema=Proposal,
                 invoke=self.invoke,
             )
